@@ -37,7 +37,7 @@ case ${VSC_INSTITUTE_CLUSTER} in
 esac
 
 export EIGEN3_ROOT=$EBROOTEIGEN/include
-
+export gqcp_DIR=${VSC_DATA}/apps/${VSC_INSTITUTE_CLUSTER}/gqcg/gqcp/
 # 1. install
 cd $HOME/drivers
 rm -rf $VSC_INSTITUTE_CLUSTER
