@@ -13,6 +13,8 @@
 #include <boost/program_options.hpp>
 #include <boost/algorithm/string.hpp>
 #include <gqcp.hpp>
+#include <HamiltonianParameters/AtomicDecompositionParameters.hpp>
+#include <HamiltonianBuilder/FrozenCoreFCI.hpp>
 #include <algorithm>
 
 namespace po = boost::program_options;
@@ -23,9 +25,14 @@ struct PairSort
     size_t origin;
     double mul;
     double entropy;
+    double en_A;
+    double en_AA;
+    double en_B;
+    double en_BB;
+    double en_AB;
 
-    PairSort(GQCP::Eigenpair pair, size_t origin, double mul, double entropy) : pair(std::move(pair)), origin(origin), mul(mul), entropy(entropy) {};
-    PairSort(const PairSort& pairs) :  pair(pairs.pair), origin(pairs.origin), mul(pairs.mul), entropy(pairs.entropy) {};
+    PairSort(GQCP::Eigenpair pair, size_t origin, double mul, double entropy, double en_A, double en_AA, double en_B, double en_BB, double en_AB) : pair(std::move(pair)), origin(origin), mul(mul), entropy(entropy), en_A(en_A), en_AA(en_AA), en_B(en_B), en_BB(en_BB), en_AB(en_AB) {};
+    PairSort(const PairSort& pairs) :  pair(pairs.pair), origin(pairs.origin), mul(pairs.mul), entropy(pairs.entropy), en_A(pairs.en_A), en_AA(pairs.en_AA), en_B(pairs.en_B), en_BB(pairs.en_BB), en_AB(pairs.en_AB) {};
 
 
     bool operator<(const PairSort& x) const {
@@ -45,8 +52,6 @@ struct PairSort
     bool operator==(const PairSort& x) const {
         return (this->pair.isEqual(x.pair));
     };
-
-
 
 };
 
@@ -150,6 +155,8 @@ int main(int argc, char** argv) {
     // +1 charge we are hard coding NO+
     GQCP::Molecule molecule (atom_list, +1);
 
+    GQCP::AtomicDecompositionParameters adp(molecule, basisset);
+
     auto mol_ham_par = GQCP::HamiltonianParameters<double>::Molecular(molecule, basisset);  // in the AO basis
     auto K = mol_ham_par.get_K();
     mol_ham_par.LowdinOrthonormalize();
@@ -213,13 +220,24 @@ int main(int argc, char** argv) {
             double en = pair.get_eigenvalue();
             rdm_calculator.set_coefficients(fci_coefficients);
             GQCP::OneRDM<double> D = rdm_calculator.calculate1RDMs().one_rdm;
+            GQCP::TwoRDM<double> d = rdm_calculator.calculate2RDMs().two_rdm;
             double mul = calculateExpectationValue(mulliken_operator, D);
             GQCP::WaveFunction wavefunction (fock_space, fci_coefficients);
             double entropy = wavefunction.calculateShannonEntropy();
             double fci_energy = en + internuclear_repulsion_energy + lambdas(i) * mul;
 
+            const auto& T = mol_ham_par.get_T_total();
+            auto D_ao = T * D * T.adjoint();
+            d.fourModeMultiplication<double>(T.adjoint().conjugate(), T.adjoint(), T.adjoint().conjugate(), T.adjoint());
+
+            double en_A = GQCP::calculateExpectationValue(adp.fragment_parameters[0], D_ao, d);
+            double en_B = GQCP::calculateExpectationValue(adp.fragment_parameters[1], D_ao, d);
+            double en_AA = GQCP::calculateExpectationValue(adp.net_atomic_parameters[0], D_ao, d);
+            double en_BB = GQCP::calculateExpectationValue(adp.net_atomic_parameters[1], D_ao, d);
+            double en_AB = GQCP::calculateExpectationValue(adp.interaction_parameters[0], D_ao, d);
+
             GQCP::Eigenpair constrained_pair(fci_energy, fci_coefficients);
-            sorting_vector.emplace_back(constrained_pair, j, mul, entropy);
+            sorting_vector.emplace_back(constrained_pair, j, mul, entropy, en_A, en_AA, en_B, en_BB, en_AB);
         }
         std::sort(sorting_vector.begin(), sorting_vector.end(), []( const PairSort &left, const PairSort &right )
         { return ( left.pair.get_eigenvalue() < right.pair.get_eigenvalue() ); } );
