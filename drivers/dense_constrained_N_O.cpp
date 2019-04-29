@@ -248,11 +248,13 @@ int main(int argc, char** argv) {
             if (counter < target) {
                 auto& output_file = outputfiles[counter];
                 output_file << std::setprecision(15) << sorted.pair.get_eigenvalue()  << "\t" << lambdas(i) << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
-                          << sorted.origin << "\t" << counter << std::endl;
+                    << sorted.en_A << "\t" << sorted.en_AA << "\t" << sorted.en_B << "\t" << sorted.en_BB << "\t" << sorted.en_AB << "\t"
+                        << sorted.origin << "\t" << counter << std::endl;
             }
 
             dense_log << std::setprecision(15) << sorted.pair.get_eigenvalue()  << "\t" << lambdas(i) << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
-                      << sorted.origin << "\t" << counter << std::endl;
+                    << sorted.en_A << "\t" << sorted.en_AA << "\t" << sorted.en_B << "\t" << sorted.en_BB << "\t" << sorted.en_AB << "\t"
+                    << sorted.origin << "\t" << counter << std::endl;
             counter++;
         }
 
