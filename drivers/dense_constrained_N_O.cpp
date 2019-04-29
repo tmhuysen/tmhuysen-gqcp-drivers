@@ -225,6 +225,7 @@ int main(int argc, char** argv) {
             GQCP::WaveFunction wavefunction (fock_space, fci_coefficients);
             double entropy = wavefunction.calculateShannonEntropy();
             double fci_energy = en + internuclear_repulsion_energy + lambdas(i) * mul;
+            std::cout<<fci_energy;
 
             const auto& T = mol_ham_par.get_T_total();
             auto D_ao = T * D * T.adjoint();
