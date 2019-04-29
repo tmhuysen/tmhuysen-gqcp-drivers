@@ -44,4 +44,4 @@ rm -rf $VSC_INSTITUTE_CLUSTER
 mkdir $VSC_INSTITUTE_CLUSTER
 cd $VSC_INSTITUTE_CLUSTER
 git clone https://github.com/tmhuysen/tmhuysen-gqcp-drivers.git
-(cd tmhuysen-gqcp-drivers && rm -rf build && mkdir build && cd build && cmake .. -DCMAKE_C_COMPILER=icc -DCMAKE_CXX_COMPILER=icpc && make VERBOSE=1 -j ${PPN})
+(cd tmhuysen-gqcp-drivers && rm -rf build && mkdir build && cd build && cmake .. -DCMAKE_C_COMPILER=icc -DCMAKE_CXX_COMPILER=icpc)
