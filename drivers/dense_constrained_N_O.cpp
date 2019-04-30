@@ -25,14 +25,9 @@ struct PairSort
     size_t origin;
     double mul;
     double entropy;
-    double en_A;
-    double en_AA;
-    double en_B;
-    double en_BB;
-    double en_AB;
 
-    PairSort(GQCP::Eigenpair pair, size_t origin, double mul, double entropy, double en_A, double en_AA, double en_B, double en_BB, double en_AB) : pair(std::move(pair)), origin(origin), mul(mul), entropy(entropy), en_A(en_A), en_AA(en_AA), en_B(en_B), en_BB(en_BB), en_AB(en_AB) {};
-    PairSort(const PairSort& pairs) :  pair(pairs.pair), origin(pairs.origin), mul(pairs.mul), entropy(pairs.entropy), en_A(pairs.en_A), en_AA(pairs.en_AA), en_B(pairs.en_B), en_BB(pairs.en_BB), en_AB(pairs.en_AB) {};
+    PairSort(GQCP::Eigenpair pair, size_t origin, double mul, double entropy) : pair(std::move(pair)), origin(origin), mul(mul), entropy(entropy) {};
+    PairSort(const PairSort& pairs) :  pair(pairs.pair), origin(pairs.origin), mul(pairs.mul), entropy(pairs.entropy) {};
 
 
     bool operator<(const PairSort& x) const {
@@ -198,6 +193,7 @@ int main(int argc, char** argv) {
 
         GQCP::CISolver ci_solver (fci, constrained_ham_par);
 
+        auto start1 = std::chrono::high_resolution_clock::now();
         // SOLVE
         try {
             ci_solver.solve(solver_options);
@@ -206,47 +202,82 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        auto stop1 = std::chrono::high_resolution_clock::now();
+        // Process the chrono time and output
+        auto elapsed_time1 = stop1 - start1;           // in nanoseconds
+        auto seconds1 = elapsed_time1.count() / 1e9;  // in seconds
+        std::cout << "TOTAL DENSE SOLVE TIME" << " : " << seconds1 << " seconds" << std::endl;
 
         const auto& all_pairs = ci_solver.get_eigenpairs();
         std::vector<PairSort> sorting_vector;
         sorting_vector.reserve(fock_space.get_dimension());
 
+        double total = 0;
         for (size_t j = 0; j < fock_space.get_dimension(); j++) {
 
             const GQCP::Eigenpair& pair = all_pairs[j];
 
+            auto start2 = std::chrono::high_resolution_clock::now();
 
             const auto& fci_coefficients = pair.get_eigenvector();
             double en = pair.get_eigenvalue();
             rdm_calculator.set_coefficients(fci_coefficients);
             GQCP::OneRDM<double> D = rdm_calculator.calculate1RDMs().one_rdm;
             GQCP::TwoRDM<double> d = rdm_calculator.calculate2RDMs().two_rdm;
+
+            auto stop2 = std::chrono::high_resolution_clock::now();
+            // Process the chrono time and output
+            auto elapsed_time2 = stop2 - start2;           // in nanoseconds
+            auto seconds2 = elapsed_time2.count() / 1e9;  // in seconds
+            total += seconds2;
+
             double mul = calculateExpectationValue(mulliken_operator, D);
             GQCP::WaveFunction wavefunction (fock_space, fci_coefficients);
             double entropy = wavefunction.calculateShannonEntropy();
             double fci_energy = en + internuclear_repulsion_energy + lambdas(i) * mul;
-            std::cout<<fci_energy;
 
             const auto& T = mol_ham_par.get_T_total();
             auto D_ao = T * D * T.adjoint();
             d.fourModeMultiplication<double>(T.adjoint().conjugate(), T.adjoint(), T.adjoint().conjugate(), T.adjoint());
 
-            double en_A = GQCP::calculateExpectationValue(adp.fragment_parameters[0], D_ao, d);
-            double en_B = GQCP::calculateExpectationValue(adp.fragment_parameters[1], D_ao, d);
-            double en_AA = GQCP::calculateExpectationValue(adp.net_atomic_parameters[0], D_ao, d);
-            double en_BB = GQCP::calculateExpectationValue(adp.net_atomic_parameters[1], D_ao, d);
-            double en_AB = GQCP::calculateExpectationValue(adp.interaction_parameters[0], D_ao, d);
-
             GQCP::Eigenpair constrained_pair(fci_energy, fci_coefficients);
-            sorting_vector.emplace_back(constrained_pair, j, mul, entropy, en_A, en_AA, en_B, en_BB, en_AB);
+            sorting_vector.emplace_back(constrained_pair, j, mul, entropy);
         }
+        std::cout << "RDM TIME" << " : " << total << " seconds" << std::endl;
+        auto start3 = std::chrono::high_resolution_clock::now();
+
         std::sort(sorting_vector.begin(), sorting_vector.end(), []( const PairSort &left, const PairSort &right )
         { return ( left.pair.get_eigenvalue() < right.pair.get_eigenvalue() ); } );
+
+        auto stop3 = std::chrono::high_resolution_clock::now();
+        // Process the chrono time and output
+        auto elapsed_time3 = stop3 - start3;           // in nanoseconds
+        auto seconds3 = elapsed_time3.count() / 1e9;  // in seconds
+        std::cout << "sort time" << " : " << seconds3 << "seconds" << std::endl;
 
         size_t counter = 0;
         for (auto const& sorted : sorting_vector) {
 
             if (counter < target) {
+
+                const auto& fci_coefficients = sorted.pair.get_eigenvector();
+
+                rdm_calculator.set_coefficients(fci_coefficients);
+                GQCP::OneRDM<double> D = rdm_calculator.calculate1RDMs().one_rdm;
+                GQCP::TwoRDM<double> d = rdm_calculator.calculate2RDMs().two_rdm;
+
+                const auto& T = mol_ham_par.get_T_total();
+                auto D_ao = T * D * T.adjoint();
+                d.fourModeMultiplication<double>(T.adjoint().conjugate(), T.adjoint(), T.adjoint().conjugate(), T.adjoint());
+
+                double en_A = GQCP::calculateExpectationValue(adp.fragment_parameters[0], D_ao, d);
+                double en_B = GQCP::calculateExpectationValue(adp.fragment_parameters[1], D_ao, d);
+                double en_AA = GQCP::calculateExpectationValue(adp.net_atomic_parameters[0], D_ao, d);
+                double en_BB = GQCP::calculateExpectationValue(adp.net_atomic_parameters[1], D_ao, d);
+                double en_AB = GQCP::calculateExpectationValue(adp.interaction_parameters[0], D_ao, d);
+
+
+
                 auto& output_file = outputfiles[counter];
                 output_file << std::setprecision(15) << sorted.pair.get_eigenvalue()  << "\t" << lambdas(i) << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
                     << sorted.en_A << "\t" << sorted.en_AA << "\t" << sorted.en_B << "\t" << sorted.en_BB << "\t" << sorted.en_AB << "\t"
@@ -254,7 +285,7 @@ int main(int argc, char** argv) {
             }
 
             dense_log << std::setprecision(15) << sorted.pair.get_eigenvalue()  << "\t" << lambdas(i) << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
-                    << sorted.en_A << "\t" << sorted.en_AA << "\t" << sorted.en_B << "\t" << sorted.en_BB << "\t" << sorted.en_AB << "\t"
+                    << "\t"
                     << sorted.origin << "\t" << counter << std::endl;
             counter++;
         }
