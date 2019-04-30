@@ -288,6 +288,10 @@ int main(int argc, char** argv) {
                     << "\t"
                     << sorted.origin << "\t" << counter << std::endl;
             counter++;
+
+            if (counter == 100) {
+                break;
+            }
         }
 
         dense_log.close();
