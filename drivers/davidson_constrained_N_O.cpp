@@ -19,37 +19,6 @@
 
 namespace po = boost::program_options;
 
-struct PairSort
-{
-    GQCP::Eigenpair pair;
-    size_t origin;
-    double mul;
-    double entropy;
-
-    PairSort(GQCP::Eigenpair pair, size_t origin, double mul, double entropy) : pair(std::move(pair)), origin(origin), mul(mul), entropy(entropy) {};
-    PairSort(const PairSort& pairs) :  pair(pairs.pair), origin(pairs.origin), mul(pairs.mul), entropy(pairs.entropy) {};
-
-
-    bool operator<(const PairSort& x) const {
-        if (this->pair.isEqual(x.pair)){
-            return false;
-        }
-        return this->pair.get_eigenvalue() < x.pair.get_eigenvalue();
-    };
-
-    bool operator>(const PairSort& x) const {
-        if (this->pair.isEqual(x.pair)){
-            return false;
-        }
-        return this->pair.get_eigenvalue() > x.pair.get_eigenvalue();
-    };
-
-    bool operator==(const PairSort& x) const {
-        return (this->pair.isEqual(x.pair));
-    };
-
-};
-
 
 int main(int argc, char** argv) {
 
@@ -58,7 +27,6 @@ int main(int argc, char** argv) {
      */
     // Time the EXE
     auto start = std::chrono::high_resolution_clock::now();
-    size_t target = 10;
     // Molecule specifications
     std::string atom_str1 = "N";
     std::string atom_str2 = "O";
@@ -121,7 +89,7 @@ int main(int argc, char** argv) {
 
     std::vector<std::ofstream> outputfiles;
 
-    for (size_t i = 0; i < target; i++) {
+    for (size_t i = 0; i < 1; i++) {
         std::string output_filename = atom_str1 + "_" + atom_str2 + "_" + distance_string + "_constrained_fci_dense_" + basisset + name + ".out" + std::to_string(i);
         std::ofstream output_file;
         output_file.open(output_filename, std::fstream::out);
@@ -154,7 +122,50 @@ int main(int argc, char** argv) {
 
     auto mol_ham_par = GQCP::HamiltonianParameters<double>::Molecular(molecule, basisset);  // in the AO basis
     auto K = mol_ham_par.get_K();
-    mol_ham_par.LowdinOrthonormalize();
+
+    try {
+        // define individual atoms as molecular fractions
+        GQCP::Molecule mol_fraction1(std::vector<GQCP::Atom>{atom1}, +1);
+        GQCP::Molecule mol_fraction2(std::vector<GQCP::Atom>{atom2});
+
+        auto ham_par1 = GQCP::HamiltonianParameters<double>::Molecular(mol_fraction1, basisset);
+        auto ham_par2 = GQCP::HamiltonianParameters<double>::Molecular(mol_fraction2, basisset);
+
+        // Perform DIIS RHF for individual fractions
+        GQCP::DIISRHFSCFSolver diis_scf_solver1 (ham_par1, mol_fraction1, 6, 6, 1e-12, 500);
+        GQCP::DIISRHFSCFSolver diis_scf_solver2 (ham_par2, mol_fraction2, 6, 6, 1e-12, 500);
+        diis_scf_solver1.solve();
+        diis_scf_solver2.solve();
+        auto rhf1 = diis_scf_solver1.get_solution();
+        auto rhf2 = diis_scf_solver2.get_solution();
+
+        // Retrieve transformation from the solutions and transform the Hamiltonian parameters
+        size_t K1 = ham_par1.get_K();
+        size_t K2 = ham_par2.get_K();
+
+        Eigen::MatrixXd T = Eigen::MatrixXd::Zero(K, K);
+        T.topLeftCorner(K1, K1) += rhf1.get_C();
+        T.bottomRightCorner(K2, K2) += rhf2.get_C();
+        mol_ham_par.transform<double>(T);
+
+        // Perform DIIS with the new basis if this fails Lodwin orthonormalize
+        try {
+            GQCP::DIISRHFSCFSolver diis_scf_solver (mol_ham_par, molecule, 6, 6, 1e-12, 500);
+            diis_scf_solver.solve();
+            auto rhf = diis_scf_solver.get_solution();
+            mol_ham_par.transform(rhf.get_C());
+
+        } catch (const std::exception& e) {
+            output_log << "Lodwin Orthonormalized" << std::endl;
+            mol_ham_par.LowdinOrthonormalize();
+        }
+
+    } catch (const std::exception& e) {
+        output_log << e.what() << std::endl;
+        outputfiles[0].close();
+        output_log.close();
+        return 1;
+    }
 
     // chose first half of AO as constrain targets
     std::vector<size_t> AOlist;
@@ -168,8 +179,7 @@ int main(int argc, char** argv) {
     output_log << "selected BF: " << std::setprecision(15) << std::endl << bfsv.transpose() << std::endl;
 
     GQCP::FrozenProductFockSpace fock_space (K, N_alpha, N_beta, X);
-    GQCP::DenseSolverOptions solver_options;
-    solver_options.number_of_requested_eigenpairs = fock_space.get_dimension(); // request to store all eigenpairs
+    GQCP::DavidsonSolverOptions solver_options (fock_space.HartreeFockExpansion());
 
     /**
      *  CALCULATIONS
@@ -180,14 +190,6 @@ int main(int argc, char** argv) {
     auto mulliken_operator = mol_ham_par.calculateMullikenOperator(AOlist);
 
     for (size_t i = 0; i < lambdas.rows(); i++) { // lambda iterations
-
-        std::string lambdastr = "_lambda" + std::to_string(lambdas(i));
-        std::string dense_filename;
-        std::ofstream dense_log;
-        dense_filename =
-                atom_str1 + "_" + atom_str2 + "_" + distance_string + "_constrained_fci_dense_" + basisset + lambdastr + name + ".full"; // NOLINT(performance-inefficient-string-concatenation)
-        dense_log.open(dense_filename, std::fstream::out);
-
         // Created constrained ham_par
         auto constrained_ham_par = mol_ham_par.constrain(mulliken_operator, lambdas(i));
 
@@ -206,93 +208,45 @@ int main(int argc, char** argv) {
         // Process the chrono time and output
         auto elapsed_time1 = stop1 - start1;           // in nanoseconds
         auto seconds1 = elapsed_time1.count() / 1e9;  // in seconds
-        std::cout << "TOTAL DENSE SOLVE TIME" << " : " << seconds1 << " seconds" << std::endl;
+        std::cout << "TOTAL DAVIDSON SOLVE TIME" << " : " << seconds1 << " seconds" << std::endl;
 
-        const auto& all_pairs = ci_solver.get_eigenpairs();
-        std::vector<PairSort> sorting_vector;
-        sorting_vector.reserve(fock_space.get_dimension());
+        const GQCP::Eigenpair& pair = ci_solver.get_eigenpair();
 
-        double total = 0;
-        for (size_t j = 0; j < fock_space.get_dimension(); j++) {
 
-            const GQCP::Eigenpair& pair = all_pairs[j];
+        auto start2 = std::chrono::high_resolution_clock::now();
 
-            auto start2 = std::chrono::high_resolution_clock::now();
+        const auto& fci_coefficients = pair.get_eigenvector();
+        double en = pair.get_eigenvalue();
+        rdm_calculator.set_coefficients(fci_coefficients);
+        GQCP::OneRDM<double> D = rdm_calculator.calculate1RDMs().one_rdm;
+        GQCP::TwoRDM<double> d = rdm_calculator.calculate2RDMs().two_rdm;
 
-            const auto& fci_coefficients = pair.get_eigenvector();
-            double en = pair.get_eigenvalue();
-            rdm_calculator.set_coefficients(fci_coefficients);
-            GQCP::OneRDM<double> D = rdm_calculator.calculate1RDMs().one_rdm;
-
-            auto stop2 = std::chrono::high_resolution_clock::now();
-            // Process the chrono time and output
-            auto elapsed_time2 = stop2 - start2;           // in nanoseconds
-            auto seconds2 = elapsed_time2.count() / 1e9;  // in seconds
-            total += seconds2;
-
-            double mul = calculateExpectationValue(mulliken_operator, D);
-            GQCP::WaveFunction wavefunction (fock_space, fci_coefficients);
-            double entropy = wavefunction.calculateShannonEntropy();
-            double fci_energy = en + internuclear_repulsion_energy + lambdas(i) * mul;
-
-            const auto& T = mol_ham_par.get_T_total();
-            auto D_ao = T * D * T.adjoint();
-
-            GQCP::Eigenpair constrained_pair(fci_energy, fci_coefficients);
-            sorting_vector.emplace_back(constrained_pair, j, mul, entropy);
-        }
-        std::cout << "RDM TIME" << " : " << total << " seconds" << std::endl;
-        auto start3 = std::chrono::high_resolution_clock::now();
-
-        std::sort(sorting_vector.begin(), sorting_vector.end(), []( const PairSort &left, const PairSort &right )
-        { return ( left.pair.get_eigenvalue() < right.pair.get_eigenvalue() ); } );
-
-        auto stop3 = std::chrono::high_resolution_clock::now();
+        auto stop2 = std::chrono::high_resolution_clock::now();
         // Process the chrono time and output
-        auto elapsed_time3 = stop3 - start3;           // in nanoseconds
-        auto seconds3 = elapsed_time3.count() / 1e9;  // in seconds
-        std::cout << "sort time" << " : " << seconds3 << "seconds" << std::endl;
+        auto elapsed_time2 = stop2 - start2;           // in nanoseconds
+        auto seconds2 = elapsed_time2.count() / 1e9;  // in seconds
+        std::cout << "RDM TIME" << " : " << seconds2 << " seconds" << std::endl;
 
-        size_t counter = 0;
-        for (auto const& sorted : sorting_vector) {
+        double mul = calculateExpectationValue(mulliken_operator, D);
+        GQCP::WaveFunction wavefunction (fock_space, fci_coefficients);
+        double entropy = wavefunction.calculateShannonEntropy();
+        double fci_energy = en + internuclear_repulsion_energy + lambdas(i) * mul;
 
-            if (counter < target) {
+        const auto& T = mol_ham_par.get_T_total();
+        auto D_ao = T * D * T.adjoint();
+        d.fourModeMultiplication<double>(T.adjoint().conjugate(), T.adjoint(), T.adjoint().conjugate(), T.adjoint());
 
-                const auto& fci_coefficients = sorted.pair.get_eigenvector();
-
-                rdm_calculator.set_coefficients(fci_coefficients);
-                GQCP::OneRDM<double> D = rdm_calculator.calculate1RDMs().one_rdm;
-                GQCP::TwoRDM<double> d = rdm_calculator.calculate2RDMs().two_rdm;
-
-                const auto& T = mol_ham_par.get_T_total();
-                auto D_ao = T * D * T.adjoint();
-                d.fourModeMultiplication<double>(T.adjoint().conjugate(), T.adjoint(), T.adjoint().conjugate(), T.adjoint());
-
-                double en_A = GQCP::calculateExpectationValue(adp.fragment_parameters[0], D_ao, d);
-                double en_B = GQCP::calculateExpectationValue(adp.fragment_parameters[1], D_ao, d);
-                double en_AA = GQCP::calculateExpectationValue(adp.net_atomic_parameters[0], D_ao, d);
-                double en_BB = GQCP::calculateExpectationValue(adp.net_atomic_parameters[1], D_ao, d);
-                double en_AB = GQCP::calculateExpectationValue(adp.interaction_parameters[0], D_ao, d);
+        double en_A = GQCP::calculateExpectationValue(adp.fragment_parameters[0], D_ao, d);
+        double en_B = GQCP::calculateExpectationValue(adp.fragment_parameters[1], D_ao, d);
+        double en_AA = GQCP::calculateExpectationValue(adp.net_atomic_parameters[0], D_ao, d);
+        double en_BB = GQCP::calculateExpectationValue(adp.net_atomic_parameters[1], D_ao, d);
+        double en_AB = GQCP::calculateExpectationValue(adp.interaction_parameters[0], D_ao, d);
 
 
+        outputfiles[0] << std::setprecision(15) << fci_energy << "\t" << lambdas(i) << "\t" << mul << "\t" << entropy << "\t"
+                    << en_A << "\t" << en_AA << "\t" << en_B << "\t" << en_BB << "\t" << en_AB
+                    << std::endl;
 
-                auto& output_file = outputfiles[counter];
-                output_file << std::setprecision(15) << sorted.pair.get_eigenvalue()  << "\t" << lambdas(i) << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
-                    << en_A << "\t" << en_AA << "\t" << en_B << "\t" << en_BB << "\t" << en_AB << "\t"
-                        << sorted.origin << "\t" << counter << std::endl;
-            }
-
-            dense_log << std::setprecision(15) << sorted.pair.get_eigenvalue()  << "\t" << lambdas(i) << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
-                    << "\t"
-                    << sorted.origin << "\t" << counter << std::endl;
-            counter++;
-
-            if (counter < target) {
-                break;
-            }
-        }
-
-        dense_log.close();
     }
 
     output_log << "mullikenoperator: " << std::setprecision(15) << std::endl << mulliken_operator << std::endl;
