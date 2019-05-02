@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
                     << sorted.origin << "\t" << counter << std::endl;
             counter++;
 
-            if (counter < target) {
+            if (counter == target) {
                 break;
             }
         }
