@@ -30,6 +30,9 @@ struct PairSort
     PairSort(GQCP::Eigenpair pair, size_t origin, double mul, double entropy, double lambda) : pair(std::move(pair)), origin(origin), mul(mul), entropy(entropy), lambda(lambda) {};
     PairSort(const PairSort& pairs) :  pair(pairs.pair), origin(pairs.origin), mul(pairs.mul), entropy(pairs.entropy), lambda(pairs.lambda) {};
 
+    PairSort() : pair(0, GQCP::VectorX<double>::Zero(0)) {
+
+    }
 
     bool operator<(const PairSort& x) const {
         if (this->pair.isEqual(x.pair)){
@@ -113,7 +116,7 @@ int main(int argc, char** argv) {
 
     double len = (max_range_population - min_range_population)/interval_population;
     auto len_int = static_cast<size_t>(len);
-    std::vector<std::vector<PairSort>> population_collection (len_int);
+    std::vector<PairSort> population_collection (len_int);
     std::vector<std::string> splitted_line_lambda;
     boost::split(splitted_line_lambda, lambda_string, boost::is_any_of(","));
 
@@ -245,7 +248,9 @@ int main(int argc, char** argv) {
 
             auto pop_index = static_cast<size_t>((mul/interval_population - min_range_population/interval_population));
 
-            population_collection[pop_index].emplace_back(constrained_pair, j, mul, entropy, lambdas(i));
+            if (population_collection[pop_index].pair.get_eigenvalue() >  fci_energy) {
+                population_collection[pop_index] = PairSort(constrained_pair, j, mul, entropy, lambdas(i));
+            }
         }
         std::cout << "RDM TIME" << " : " << total << " seconds" << std::endl;
 
@@ -253,10 +258,6 @@ int main(int argc, char** argv) {
 
     auto start3 = std::chrono::high_resolution_clock::now();
 
-    for (auto& population_collection_vector : population_collection) {
-        std::sort(population_collection_vector.begin(), population_collection_vector.end(), []( const PairSort &left, const PairSort &right )
-        { return ( left.pair.get_eigenvalue() < right.pair.get_eigenvalue() ); } );
-    }
 
 
     auto stop3 = std::chrono::high_resolution_clock::now();
@@ -269,8 +270,8 @@ int main(int argc, char** argv) {
 
     for (size_t j = 0; j < len_int; j++) {
 
-        if (!population_collection[j].empty()) {
-            const auto& sorted = population_collection[j][0];
+        if (population_collection[j].pair.get_eigenvalue() < 0) {
+            const auto& sorted = population_collection[j];
             const auto& fci_coefficients = sorted.pair.get_eigenvector();
 
             rdm_calculator.set_coefficients(fci_coefficients);
