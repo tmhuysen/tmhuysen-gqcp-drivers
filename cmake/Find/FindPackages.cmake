@@ -10,3 +10,8 @@ if (USE_MKL)
     find_package(MKL REQUIRED)
 endif()
 
+
+set(ENV{ZLIB_ROOT} "/opt/local")
+set(ENV{SZIP_ROOT} "/opt/local")
+
+find_package(HDF5 COMPONENTS C HL NO_MODULE REQUIRED static)

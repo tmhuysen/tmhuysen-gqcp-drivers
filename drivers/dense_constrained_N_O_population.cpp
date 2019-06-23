@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
 
 
             auto& output_file = outputfiles[counter];
-            output_file << std::scientific << sorted.pair.get_eigenvalue()  << "\t" << sorted.lambda << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
+            output_file << std::setprecision(16) << sorted.pair.get_eigenvalue()  << "\t" << sorted.lambda << "\t" << sorted.mul << "\t" << sorted.entropy << "\t"
                         << en_A << "\t" << en_AA << "\t" << en_B << "\t" << en_BB << "\t" << en_AB << "\t"
                         << sorted.origin << "\t" << counter << std::endl;
         }
