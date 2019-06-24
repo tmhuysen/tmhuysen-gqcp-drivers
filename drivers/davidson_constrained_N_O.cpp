@@ -83,23 +83,14 @@ int main(int argc, char** argv) {
 
     // Create and open a file
 
-    std::ostringstream distance_string_precursor;
-    distance_string_precursor << std::setprecision(2) << distance;
-    std::string distance_string = distance_string_precursor.str();
-
-    std::vector<std::ofstream> outputfiles;
-
-    for (size_t i = 0; i < 1; i++) {
-        std::string output_filename = atom_str1 + "_" + atom_str2 + "_" + distance_string + "_constrained_fci_dense_" + basisset + name + ".out" + std::to_string(i);
-        std::ofstream output_file;
-        output_file.open(output_filename, std::fstream::out);
-        outputfiles.push_back(std::move(output_file));
-    }
-    std::string output_filename_log = atom_str1 + "_" + atom_str2 + "_" + distance_string + "_constrained_fci_dense_" + basisset + name + ".log" ;
+    std::string output_filename_log = name + ".log";
+    std::string output_filename_bin = name + ".out";
     std::ofstream output_log;
+    std::ofstream output_file;
+    output_file.open(output_filename_bin, std::fstream::out);
     output_log.open(output_filename_log, std::fstream::out);
     output_log << "init" <<std::endl;
-    output_log << "Version: " << std::setprecision(15) << GQCP_GIT_SHA1 <<  std::endl;
+    output_log << "Version: " << std::setprecision(15) << "placeholdergit" <<  std::endl;
     output_log << "Frozencore? : " << std::setprecision(15) << std::endl << X << std::endl;
     output_log << "selected lambdas: " << std::setprecision(15) << std::endl << lambdas.transpose() << std::endl;
 
@@ -118,7 +109,7 @@ int main(int argc, char** argv) {
     // +1 charge we are hard coding NO+
     GQCP::Molecule molecule (atom_list, +1);
 
-    GQCP::AtomicDecompositionParameters adp = GQCP::AtomicDecompositionParameters::Mario(molecule, basisset);
+    GQCP::AtomicDecompositionParameters adp = GQCP::AtomicDecompositionParameters::Nuclear(molecule, basisset);
 
     auto mol_ham_par = GQCP::HamiltonianParameters<double>::Molecular(molecule, basisset);  // in the AO basis
     auto K = mol_ham_par.get_K();
@@ -143,17 +134,17 @@ int main(int argc, char** argv) {
         size_t K1 = ham_par1.get_K();
         size_t K2 = ham_par2.get_K();
 
-        Eigen::MatrixXd T = Eigen::MatrixXd::Zero(K, K);
+        GQCP::SquareMatrix<double> T = Eigen::MatrixXd::Zero(K, K);
         T.topLeftCorner(K1, K1) += rhf1.get_C();
         T.bottomRightCorner(K2, K2) += rhf2.get_C();
-        mol_ham_par.transform<double>(T);
+        mol_ham_par.basisTransform(T);
 
         // Perform DIIS with the new basis if this fails Lodwin orthonormalize
         try {
             GQCP::DIISRHFSCFSolver diis_scf_solver (mol_ham_par, molecule, 6, 6, 1e-12, 500);
             diis_scf_solver.solve();
             auto rhf = diis_scf_solver.get_solution();
-            mol_ham_par.transform(rhf.get_C());
+            mol_ham_par.basisTransform(rhf.get_C());
 
         } catch (const std::exception& e) {
             output_log << "Lodwin Orthonormalized" << std::endl;
@@ -162,7 +153,7 @@ int main(int argc, char** argv) {
 
     } catch (const std::exception& e) {
         output_log << e.what() << std::endl;
-        outputfiles[0].close();
+        output_file.close();
         output_log.close();
         return 1;
     }
@@ -233,20 +224,21 @@ int main(int argc, char** argv) {
         double fci_energy = en + internuclear_repulsion_energy + lambdas(i) * mul;
 
         const auto& T = mol_ham_par.get_T_total();
-        auto D_ao = T * D * T.adjoint();
-        d.fourModeMultiplication<double>(T.adjoint().conjugate(), T.adjoint(), T.adjoint().conjugate(), T.adjoint());
+        D.basisTransform<double>(T.adjoint());;
+        d.basisTransform<double>(T.adjoint());
 
-        double en_A = GQCP::calculateExpectationValue(adp.fragment_parameters[0], D_ao, d);
-        double en_B = GQCP::calculateExpectationValue(adp.fragment_parameters[1], D_ao, d);
-        double en_AA = GQCP::calculateExpectationValue(adp.net_atomic_parameters[0], D_ao, d);
-        double en_BB = GQCP::calculateExpectationValue(adp.net_atomic_parameters[1], D_ao, d);
-        double en_AB = GQCP::calculateExpectationValue(adp.interaction_parameters[0], D_ao, d);
+        double en_A = GQCP::calculateExpectationValue(adp.get_atomic_parameters()[0], D, d);
+        double en_B = GQCP::calculateExpectationValue(adp.get_atomic_parameters()[1], D, d);
+        double en_AA = GQCP::calculateExpectationValue(adp.get_net_atomic_parameters()[0], D, d);
+        double en_BB = GQCP::calculateExpectationValue(adp.get_net_atomic_parameters()[1], D, d);
+        double en_AB = GQCP::calculateExpectationValue(adp.get_interaction_parameters()[0], D, d);
 
 
-        outputfiles[0] << std::setprecision(15) << fci_energy << "\t" << lambdas(i) << "\t" << mul << "\t" << entropy << "\t"
+        output_file << std::setprecision(15) << fci_energy << "\t" << lambdas(i) << "\t" << mul << "\t" << entropy << "\t"
                     << en_A << "\t" << en_AA << "\t" << en_B << "\t" << en_BB << "\t" << en_AB
                     << std::endl;
 
+        solver_options.X_0 = fci_coefficients;
     }
 
     output_log << "mullikenoperator: " << std::setprecision(15) << std::endl << mulliken_operator << std::endl;
@@ -258,9 +250,8 @@ int main(int argc, char** argv) {
     auto seconds = elapsed_time.count() / 1e9;  // in seconds
     output_log << "TOTAL EXECUTABLE TIME" << " : " << seconds << " seconds" << std::endl;
 
-    for (auto& output_file : outputfiles) {
-        output_file.close();
-    }
+    output_file.close();
     output_log.close();
+
     return 0;
 }

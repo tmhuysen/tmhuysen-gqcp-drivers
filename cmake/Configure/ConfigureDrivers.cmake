@@ -12,5 +12,25 @@ foreach(DRIVER_SOURCE ${PROJECT_DRIVERS_SOURCE_FILES})
 
     # Include gqcp
     target_include_directories(${DRIVER_NAME} PUBLIC ${gqcp_INCLUDE_DIRS})
-    target_link_libraries(${DRIVER_NAME} PUBLIC gqcp)
+    target_link_libraries(${DRIVER_NAME} PUBLIC ${gqcp_lib})
+
+
+    target_include_directories(${DRIVER_NAME}
+            PUBLIC
+            $<INSTALL_INTERFACE:include>
+            $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+            PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            )
+
+    target_link_libraries(${DRIVER_NAME}
+            PUBLIC
+            Eigen3::Eigen
+            gqcp::gqcp
+            )
+
+    target_include_directories(${DRIVER_NAME} PUBLIC $<BUILD_INTERFACE:${BLAS_INCLUDE_DIR}>)
+    target_link_libraries(${DRIVER_NAME} PUBLIC ${BLAS_LIBRARIES})
+    target_compile_options(${DRIVER_NAME} PUBLIC -DEIGEN_USE_MKL_ALL -DMKL_LP64)
 endforeach()
