@@ -10,11 +10,6 @@ foreach(DRIVER_SOURCE ${PROJECT_DRIVERS_SOURCE_FILES})
     # Add an executable based on the source
     add_executable(${DRIVER_NAME} ${DRIVER_SOURCE})
 
-    # Include gqcp
-    target_include_directories(${DRIVER_NAME} PUBLIC ${gqcp_INCLUDE_DIRS})
-    target_link_libraries(${DRIVER_NAME} PUBLIC ${gqcp_lib})
-
-
     target_include_directories(${DRIVER_NAME}
             PUBLIC
             $<INSTALL_INTERFACE:include>
@@ -29,6 +24,7 @@ foreach(DRIVER_SOURCE ${PROJECT_DRIVERS_SOURCE_FILES})
             Eigen3::Eigen
             gqcp::gqcp
             )
+
 
     target_include_directories(${DRIVER_NAME} PUBLIC $<BUILD_INTERFACE:${BLAS_INCLUDE_DIR}>)
     target_link_libraries(${DRIVER_NAME} PUBLIC ${BLAS_LIBRARIES})
